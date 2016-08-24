@@ -1,38 +1,51 @@
 //examples at bottom
 
 var animating = false;
-var animStack = [];
+var cachedAnims = []; //all animations
+var animStack = []; //cachedAnims currently being animated
 
 class Sequence{
 	constructor(vars, dur, description, loop){
 		//might be nice to add properties and execute them based on whatever is passed, including functions. :)
-		this.dur = dur;
-		this.vars = vars; //things, possibly dynamically added, that are needed by calculations instead of the stack maniger itself
-		this.vars.default = [];
-		for(var i = 0; i <= this.vars.property.length - 1; i++){
-			var prop = window.getComputedStyle(this.vars.element)[this.vars.property[i]];
+		for(var i = 0; i <= vars.property.length - 1; i++){
+			var prop = window.getComputedStyle(vars.element)[vars.property[i]];
+			vars.default = [];
 			if(prop.substr(0,3) === 'rgb'){
-	    		this.vars.a = 1;
-	    		this.vars.b, this.vars.c = 0;
+	    		vars.a = 1;
+	    		vars.b, vars.c = 0;
 
 				prop = rgbSplit(prop);
-				if(this.vars.units == 'hsl'){
-		    		this.vars.a = 1;
-		    		this.vars.b, this.vars.c = 0;
+				if(vars.units == 'hsl'){
+		    		vars.a = 1;
+		    		vars.b, vars.c = 0;
 					prop = rgbToHsl(prop[0], prop[1], prop[2]);
-				} else if (this.vars.units == 'rgb') {
+				} else if (vars.units == 'rgb') {
+					// console.log(vars.default[i])
 				}
-				this.vars.default.push(prop);
+				vars.default.push(prop);
+			} else if (prop.substr(0,5) == 'matrix'){
+				//not sure yet
+			} else if (vars.property[i] == 'transform'){
+				if (vars.transform[i].substr(0,5) == 'scale'){
+					vars.default.push([1,1]);
+					vars.units = '';
+				} else {
+				}
 			} else {
-				this.vars.default.push(parseFloat(prop));
+				// vars.default.push(prop);
+				vars.default.push(parseFloat(prop));
 			}
-		} 
+		}
 
+		this.vars = vars; //things, possibly dynamically added, that are needed by calculations instead of the stack maniger itself
+		this.dur = dur;
 		this.description = description;
 		this.offset = 0;
 		this.direction = 0;
 		this.startTime = 0;
+		this.firstFrame = true;
 		this.reverse = false; //if the animation is in a refersed state
+		this.reversed = false; //if the animation is in a refersed state
 		this.loop = loop; //amount if times it should loop.
 			//-1 means the animation begins has to return to the default stay after some point rather than loop
 		this.count = 0; //times it's looped
@@ -73,6 +86,12 @@ Sequence.prototype.step = function step(change){
 /*	when multiple animations are implemented, 
 	all data accessing needs to be done at the same time 
 	and data updates need to be done at the same time*/
+	var total;
+
+	if(this.vars.code){
+		var exec = this.vars.code(this, change);
+		exec()
+	}
 
 	for(var i = 0; i <= this.vars.property.length - 1; i++){
 		if(this.vars.units == 'hsl' || this.vars.units == 'rgb'){
@@ -80,38 +99,37 @@ Sequence.prototype.step = function step(change){
 			result[0] = change * (this.vars.color[0] - this.vars.default[i][0])+ this.vars.default[i][0];
 			result[1] = change * (this.vars.color[1] - this.vars.default[i][1])+ this.vars.default[i][1];
 			result[2] = change * (this.vars.color[2] - this.vars.default[i][2])+ this.vars.default[i][2];
-			// console.log(result);
-
 			if( this.vars.units == 'hsl' ){
 				result = hslToRgb(result[0], result[1], result[2]);
 			} else if ( this.vars.units == 'rgb' ){
 				result[0] = Math.round(result[0]);
 				result[1] = Math.round(result[1]);
 				result[2] = Math.round(result[2]);
-				// console.log(result);
 			}
-			this.vars.element.style[this.vars.property[i]] = "rgb("+result[0]+","+result[1]+","+result[2]+")";
-			// console.log( this.vars.default[i][0] + " ," + this.vars.default[i][1] + " ," + this.vars.default[i][2]);
+			total = "rgb("+result[0]+","+result[1]+","+result[2]+")";
 
 		} else if (this.vars.property == 'transform'){
 			var result = "";
-			for(var i = 1; i <= this.vars.transform.length - 1; i++){
-				result = result + " " + (change * this.vars.transform[i]) + this.vars.units;
-				if(i < this.vars.transform.length - 1){
+			for(var j = 0; j <= this.vars.transformBy.length - 1; j++){
+				var total = ( change * this.vars.transformBy[j] ) + this.vars.default[i][j];
+				result = result + " " + total + this.vars.units;
+				if(j < this.vars.transformBy.length - 1){
 					result = result + ",";
 				}
 			} 
-			// console.log(result);
 			result = this.vars.transform[0] + "(" + result + ")";
-			console.log(this.vars.element.style[this.vars.property[i]]);
-			this.vars.element.style['transform'] = result;
-			// this.vars.element.style['transform'] = 'rotate(66deg)';
+			total = result;
 
 		} else {
-			this.vars.element.style[this.vars.property[i]] = this.vars.default[i] + change + this.vars.units;
+			total = this.vars.default[i] + change + this.vars.units;
 		}
+		// console.log(total);
+		this.vars.element.style[this.vars.property[i]] = total;
 	}
 
+	//don't like this
+	if(this.firstFrame) delete this.firstFrame;
+	if(this.reversed) delete this.reversed;
 };
 
 function animThink(){
@@ -126,15 +144,13 @@ function animThink(){
 				} else {
 					continue; // skip everything else if at the end
 				}
-			} else {
+			} else { 
 				animStack[i].direction = animStack[i].offset + (animStack[i].switchTime - new Date);
 				position = animStack[i].direction/animStack[i].dur;
 			}
 
 			if(position < 0) position = 0;
 			if(position > 1) position = 1;			
-
-			// console.log(animStack[i].description + " " + i + " position:" + position);
 
 			//this is where curveStart needs to work 
 			delta = animStack[i].graph(position);
@@ -189,22 +205,22 @@ function reverseAnim(description){
 			animStack[i].switchTime = new Date;
 			animStack[i].offset = animStack[i].direction;
 			animStack[i].reverse = true;
-		break;
+			animStack[i].reversed = true;
+			break;
 		}  
 	} 
 }
 
 //add animations or update an anim that can reverse itself
 function addAnim(vars, dur, description, loop){
-	var animation = new Sequence(vars, dur, description, loop);
+	var animation;
 	
 	if(animStack.length > 0){ 
 		var found = false;
-
 		//pop this onto the end if new anim is not on list;
 		//might not be able to do this since I have to do it while animating
 		for(var i = 0; i <= animStack.length - 1; i++){
-			if( animation.description == animStack[i].description){
+			if( description == animStack[i].description){
 				if(animStack[i].reverse){
 					animStack[i].startTime = new Date; 
 					animStack[i].offset = animStack[i].direction;
@@ -219,13 +235,27 @@ function addAnim(vars, dur, description, loop){
 	}
 
 	if(!found){
+		animation = new Sequence(vars, dur, description, loop);
+
 		animation.startTime = new Date; 
 		animStack.push(animation);
 		checkAnims(); 
 	}
 };
 
-function updateAnim(vars, dur, description){
+function updateAnim( anim, variable, update){
+	for(var k = 0; k <= animStack.length - 1; k++){
+		if( anim == animStack[k].description){ 
+			animStack[k][variable] = update;
+			if(variable == 'reverse'){
+				animStack[k].switchTime = new Date;
+				animStack[k].offset = animStack[k].direction;
+				animStack[k].reverse = true;
+				animStack[k].reversed = true;
+			}
+			break;
+		}  
+	}
 
 }
 
@@ -289,7 +319,12 @@ function rgbToHsl(r, g, b){
     return [h, s, l];
 }
 
-         
+////////////////////////->////////////////////////
+// todo											//
+////////////////////////->////////////////////////
+	//clean up repetition
+	//might be better to not use loops at all and just assign numbers to animations with something like a c #define for their names and lookups no for looping, yay!
+
 ////////////////////////->////////////////////////
 // esamples										//
 ////////////////////////->////////////////////////
