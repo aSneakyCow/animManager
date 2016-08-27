@@ -2,14 +2,20 @@
 
 var animating = false;
 var cachedAnims = []; //all animations
-var animStack = []; //cachedAnims currently being animated
+var animStack = []; //stores indexes of currently active cachedAnims
+
+var oldAnimStack = [];
+
+var win = window;
+var doc = document;
 
 class Sequence{
 	constructor(vars, dur, description, loop){
 		//might be nice to add properties and execute them based on whatever is passed, including functions. :)
 		for(var i = 0; i <= vars.property.length - 1; i++){
-			var prop = window.getComputedStyle(vars.element)[vars.property[i]];
+			var prop = win.getComputedStyle(vars.element)[vars.property[i]];
 			vars.default = [];
+
 			if(prop.substr(0,3) === 'rgb'){
 	    		vars.a = 1;
 	    		vars.b, vars.c = 0;
@@ -39,19 +45,31 @@ class Sequence{
 
 		this.vars = vars; //things, possibly dynamically added, that are needed by calculations instead of the stack maniger itself
 		this.dur = dur;
-		this.description = description;
 		this.offset = 0;
-		this.direction = 0;
+		this.position = 0;
+		this.oldPosition = 0;
 		this.startTime = 0;
-		this.firstFrame = true;
 		this.reverse = false; //if the animation is in a refersed state
-		this.reversed = false; //if the animation is in a refersed state
+		this.directionChange = false; //if the animation is in a refersed state
 		this.loop = loop; //amount if times it should loop.
 			//-1 means the animation begins has to return to the default stay after some point rather than loop
 		this.count = 0; //times it's looped
 		this.curveStart; //perform entire curve regardless of position or position animation on curve?
 	};
 };
+
+(function cacheAnims(){
+	cachedAnims['bgFade'] = new Sequence({element: doc.getElementById('bgOverlay'), property: ['opacity'], units:'', curve: 'quad',  scale:1, a:.5, b:0, pow:.25, c:0}, 5000);
+	cachedAnims['topShuffle'] = new Sequence({element: doc.getElementById('topColumn'), property: ['transform'], transform: ['scale'], transformBy: [.25, .25], units:'', curve: 'quad', scale: 1, a:1, b:0, pow:.25, c:0}, 1000);
+	cachedAnims['leftPop'] = new Sequence({element: doc.getElementById('leftColumn'), property: ['left'], units:'%', curve: 'quad', scale: 1, a:50, b:0, pow:3, c:0}, 1000);
+	cachedAnims['rightPop'] = new Sequence({element: doc.getElementById('rightColumn'), property: ['left'], units:'%', curve: 'quad', scale: 1, a:50, b:0, pow:3, c:0}, 1000);
+	cachedAnims['bottomPop'] = new Sequence({element:  doc.getElementById('bottomColumn'), property: ['left'], units:'%', curve: 'quad', scale: 1, a:50, b:0, pow:3, c:0}, 1000);
+	cachedAnims['footerPop'] = new Sequence({element:  doc.getElementById('bottomList'), property: ['left'], units:'%', curve: 'quad', scale: 1, a:50, b:0, pow:3, c:0}, 1000);
+
+	cachedAnims['headerGlow'] = new Sequence({element: doc.getElementById('topBG'), property: ['background-color'], color: [230, 230, 230], units:'rgb', curve: 'quad', scale: 1, a:100, b:0, pow:.4, c:0, code: dimScreen()}, 3000);
+
+	cachedAnims['bodyDarken'] = new Sequence({element: doc.getElementById('darkenScreen'), property: ['opacity'], units:'', curve: 'quad',  scale:.75, a:1, b:0, pow:1.5, c:0, code: lightenScreen()}, 200);
+})();
 
 function lin(x, vars){
 	var y = (vars.scale * x) + vars.b;
@@ -61,7 +79,6 @@ function lin(x, vars){
 function quad(x, vars){
 	x *= vars.scale;
 	var y = (vars.a * Math.pow(x, vars.pow)) + (vars.b * x) + vars.c;
-	// console.log(vars.property);
 	return y;
 };
 
@@ -88,9 +105,10 @@ Sequence.prototype.step = function step(change){
 	and data updates need to be done at the same time*/
 	var total;
 
+
 	if(this.vars.code){
-		var exec = this.vars.code(this, change);
-		exec()
+		var exec = this.vars.code;
+		exec(this, change)
 	}
 
 	for(var i = 0; i <= this.vars.property.length - 1; i++){
@@ -121,48 +139,104 @@ Sequence.prototype.step = function step(change){
 			total = result;
 
 		} else {
-			total = this.vars.default[i] + change + this.vars.units;
+			total = (this.vars.default[i] + change) + this.vars.units;
 		}
-		// console.log(total);
 		this.vars.element.style[this.vars.property[i]] = total;
 	}
 
-	//don't like this
-	if(this.firstFrame) delete this.firstFrame;
-	if(this.reversed) delete this.reversed;
+	//don't like this :<
+	// if((this.position == 0 && this.oldPosition == 0)) this.reverse = false;
+	if(this.directionChange) this.directionChange = false;
 };
+
+function lightenScreen(){
+	return function(caller, progress){
+		if(progress <= 0 && caller.reverse){
+			caller.vars.element.style.display = 'none'; 
+		}
+	}
+}
+
+function dimScreen(){
+	return function(caller, progress){
+		anim1 = 'bodyDarken'
+
+		if( (caller.oldPosition == 0) || (caller.directionChange) ){
+			cachedAnims[anim1].vars.element.style.display = 'inline-block'; 
+			playAnim(anim1)
+		}
+
+		console.log(caller.directionChange); 
+
+		if(caller.reverse && caller.directionChange){
+			updateAnim(anim1, 'reverse', true)
+		}
+	}
+}
+
+function playAnim(description){
+	if(cachedAnims[description].position <= 0){
+		animStack.push(description)
+	}
+
+	cachedAnims[description].startTime = new Date;
+
+	if(cachedAnims[description].reverse){
+		cachedAnims[description].offset = cachedAnims[description].position;
+		cachedAnims[description].reverse = false;
+		cachedAnims[description].directionChange = true;
+	}
+	runAnims();
+}
+
+
+function runAnims(){
+	if(!animating){
+		if(animStack.length > 0){
+			animThink();
+		}
+	} else {
+	}
+};  
 
 function animThink(){
 	function animate(){
 		var delta;
 		var complete = true;
 		for(var i = 0; i <= animStack.length - 1;i++){
-			if(!animStack[i].reverse){
-				if(animStack[i].direction < animStack[i].dur){
-					animStack[i].direction = animStack[i].offset + (new Date - animStack[i].startTime);
-					position = animStack[i].direction/animStack[i].dur;
+			cachedAnims[animStack[i]].oldPosition = cachedAnims[animStack[i]].position;
+
+			if(!cachedAnims[animStack[i]].reverse){
+				if(cachedAnims[animStack[i]].position < cachedAnims[animStack[i]].dur){
+					cachedAnims[animStack[i]].position = cachedAnims[animStack[i]].offset + (new Date - cachedAnims[animStack[i]].startTime);
 				} else {
 					continue; // skip everything else if at the end
 				}
 			} else { 
-				animStack[i].direction = animStack[i].offset + (animStack[i].switchTime - new Date);
-				position = animStack[i].direction/animStack[i].dur;
+				//position is not functioning correctly. 
+				cachedAnims[animStack[i]].position = cachedAnims[animStack[i]].offset + (cachedAnims[animStack[i]].switchTime - new Date);
 			}
 
-			if(position < 0) position = 0;
-			if(position > 1) position = 1;			
+			if(cachedAnims[animStack[i]].position  < 0) cachedAnims[animStack[i]].position  = 0;
+			if(cachedAnims[animStack[i]].position  > cachedAnims[animStack[i]].dur) cachedAnims[animStack[i]].position = cachedAnims[animStack[i]].dur;	
+			
+			frac = cachedAnims[animStack[i]].position/cachedAnims[animStack[i]].dur;
+
+			if(frac < 0) frac = 0;
+			if(frac > 1) frac = 1;	
 
 			//this is where curveStart needs to work 
-			delta = animStack[i].graph(position);
-			animStack[i].step(delta);  
+			delta = cachedAnims[animStack[i]].graph(frac);
+			cachedAnims[animStack[i]].step(delta);  
 
-			if(position < 1){
+			if(frac < 1){
 				//check if all animations are complete done;
 				complete = false; 
 			}
+
 			//check if the animation is completed or if it has a triggered loop
-			if (( position >= 1 && (animStack[i].loop >= 0)) ||
-				(animStack[i].reverse == true && position == 0)) {
+			if (( frac >= 1 && (cachedAnims[animStack[i]].loop >= 0)) ||
+				(cachedAnims[animStack[i]].reverse == true && frac == 0)) {
 				//if animation is done remove it
 				//update this so that animations aren't necessarily removed, may be smarter to cache em and remove one timers only
 				animStack.splice(i, 1);
@@ -184,79 +258,14 @@ function animThink(){
   	var globalID = requestAnimationFrame(animate)
 }; 
 
-// (function perma(){
-// 	checkAnims();
-// })();
-
-//might become more complex if there's a need for different types of animations
-function checkAnims(){
-	if(!animating){
-		if(animStack.length > 0){
-			animThink();
-		}
-	} else {
-		// console.log("Already animating");
-	}
-};
-
-function reverseAnim(description){
-	for(var i = 0; i <= animStack.length - 1; i++){
-		if( description == animStack[i].description){
-			animStack[i].switchTime = new Date;
-			animStack[i].offset = animStack[i].direction;
-			animStack[i].reverse = true;
-			animStack[i].reversed = true;
-			break;
-		}  
-	} 
-}
-
-//add animations or update an anim that can reverse itself
-function addAnim(vars, dur, description, loop){
-	var animation;
-	
-	if(animStack.length > 0){ 
-		var found = false;
-		//pop this onto the end if new anim is not on list;
-		//might not be able to do this since I have to do it while animating
-		for(var i = 0; i <= animStack.length - 1; i++){
-			if( description == animStack[i].description){
-				if(animStack[i].reverse){
-					animStack[i].startTime = new Date; 
-					animStack[i].offset = animStack[i].direction;
-					animStack[i].reverse = false;
-				}
-				found = true;
-				break;
-			}  
-		}
-	} else {
-		found = false;		
-	}
-
-	if(!found){
-		animation = new Sequence(vars, dur, description, loop);
-
-		animation.startTime = new Date; 
-		animStack.push(animation);
-		checkAnims(); 
-	}
-};
-
 function updateAnim( anim, variable, update){
-	for(var k = 0; k <= animStack.length - 1; k++){
-		if( anim == animStack[k].description){ 
-			animStack[k][variable] = update;
-			if(variable == 'reverse'){
-				animStack[k].switchTime = new Date;
-				animStack[k].offset = animStack[k].direction;
-				animStack[k].reverse = true;
-				animStack[k].reversed = true;
-			}
-			break;
-		}  
+	cachedAnims[anim][variable] = update;
+	if(variable == 'reverse'){
+		cachedAnims[anim].switchTime = new Date;
+		cachedAnims[anim].offset = cachedAnims[anim].position;
+		cachedAnims[anim].reverse = true;
+		cachedAnims[anim].directionChange = true;
 	}
-
 }
 
 ////////////////////////->////////////////////////
