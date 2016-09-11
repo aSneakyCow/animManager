@@ -1,46 +1,77 @@
 //examples at bottom
-
 var animating = false;
 var cachedAnims = []; //all animations
-var animStack = []; //stores indexes of currently active cachedAnims
-
-var oldAnimStack = [];
+var animStack = []; //stores indexes of currently active cachedAnims. That's it. That's the whole thing.
 
 var win = window;
 var doc = document;
 
-class Sequence{
-	constructor(vars, dur, description, loop){
+class Sequence {
+	constructor(vars, dur){
 		//might be nice to add properties and execute them based on whatever is passed, including functions. :)
 		for(var i = 0; i <= vars.property.length - 1; i++){
 			var prop = win.getComputedStyle(vars.element)[vars.property[i]];
-			vars.default = [];
 
-			if(prop.substr(0,3) === 'rgb'){
-	    		vars.a = 1;
-	    		vars.b, vars.c = 0;
-
-				prop = rgbSplit(prop);
-				if(vars.units == 'hsl'){
+			if(vars.default === undefined){
+				vars.default = [];
+				//probably need a getAnimType func
+				if(prop.substr(0,3) === 'rgb'){
 		    		vars.a = 1;
 		    		vars.b, vars.c = 0;
-					prop = rgbToHsl(prop[0], prop[1], prop[2]);
-				} else if (vars.units == 'rgb') {
-					// console.log(vars.default[i])
-				}
-				vars.default.push(prop);
-			} else if (prop.substr(0,5) == 'matrix'){
-				//not sure yet
-			} else if (vars.property[i] == 'transform'){
-				if (vars.transform[i].substr(0,5) == 'scale'){
-					vars.default.push([1,1]);
-					vars.units = '';
+
+					prop = rgbSplit(prop);
+					if(vars.units == 'hsl'){
+			    		vars.a = 1;
+			    		vars.b, vars.c = 0;
+						prop = rgbToHsl(prop[0], prop[1], prop[2]);
+					} else if (vars.units == 'rgb') {
+					}
+					vars.default.push(prop);
+				} else if (prop.substr(0,5) == 'matrix'){
+					//not sure yet
+				} else if (vars.property[i] == 'transform'){
+					if (vars.transform[i].substr(0,5) == 'scale'){
+						vars.default.push([1,1]);
+						vars.units = '';
+					} else {
+						if(prop == 'none' || prop == 'undefined'){
+							prop = [0,0];
+						} else {
+							var matrixRemove = prop.split("(");
+							matrixRemove = matrixRemove[1].split(")"); 
+							prop = matrixRemove[0].split(","); 	
+							prop = [parseFloat(prop[4]), parseFloat(prop[5])]				
+						}
+						//need to check for 3d matrix and other types of transforms
+						//matrix(scaleX(),skewY(),skewX(),scaleY(),translateX(),translateY())
+						vars.default.push(prop);
+					}
 				} else {
+					vars.default.push(parseFloat(prop));
 				}
 			} else {
-				// vars.default.push(prop);
-				vars.default.push(parseFloat(prop));
+				var temp = [];
+				temp.push(vars.default);
+				vars.default = temp;
+
+				if(prop.substr(0,3) === 'rgb'){
+					vars.element.style[vars.property[i]] = setColor(0, vars.color,  vars.default[i], vars.units );
+					// console.log(vars.element.style[vars.property[i]]);
+				} else if (vars.property[i] == 'transform'){
+					vars.element.style[vars.property[i]] = setTransform(0, vars.transform[0], vars.transformBy.length, vars.transformBy[i], vars.default[i], vars.units );
+					console.log(vars.element.style[vars.property[i]]);
+				} else {
+					vars.element.style[vars.property[i]] = setVal(0, vars.default[i], vars.units);
+					// console.log(vars.element.style[vars.property[i]]);
+				}
 			}
+		}
+
+		if(!vars.delayFrac){
+			vars.delayFrac = 0;
+		} else {
+			if (vars.delayFrac <= 0) vars.delayFrac = 0;
+			if (vars.delayFrac >= 1) vars.delayFrac = 1;
 		}
 
 		this.vars = vars; //things, possibly dynamically added, that are needed by calculations instead of the stack maniger itself
@@ -51,34 +82,26 @@ class Sequence{
 		this.startTime = 0;
 		this.reverse = false; //if the animation is in a refersed state
 		this.directionChange = false; //if the animation is in a refersed state
-		this.loop = loop; //amount if times it should loop.
+		this.loop = 0; //amount if times it should loop.
 			//-1 means the animation begins has to return to the default stay after some point rather than loop
 		this.count = 0; //times it's looped
 		this.curveStart; //perform entire curve regardless of position or position animation on curve?
+		// this.= 0; //fraction of animation that animation should be delayed by
 	};
-};
+}; 
 
-(function cacheAnims(){
-	cachedAnims['bgFade'] = new Sequence({element: doc.getElementById('bgOverlay'), property: ['opacity'], units:'', curve: 'quad',  scale:1, a:.5, b:0, pow:.25, c:0}, 5000);
-	cachedAnims['topShuffle'] = new Sequence({element: doc.getElementById('topColumn'), property: ['transform'], transform: ['scale'], transformBy: [.25, .25], units:'', curve: 'quad', scale: 1, a:1, b:0, pow:.25, c:0}, 1000);
-	cachedAnims['leftPop'] = new Sequence({element: doc.getElementById('leftColumn'), property: ['left'], units:'%', curve: 'quad', scale: 1, a:50, b:0, pow:3, c:0}, 1000);
-	cachedAnims['rightPop'] = new Sequence({element: doc.getElementById('rightColumn'), property: ['left'], units:'%', curve: 'quad', scale: 1, a:50, b:0, pow:3, c:0}, 1000);
-	cachedAnims['bottomPop'] = new Sequence({element:  doc.getElementById('bottomColumn'), property: ['left'], units:'%', curve: 'quad', scale: 1, a:50, b:0, pow:3, c:0}, 1000);
-	cachedAnims['footerPop'] = new Sequence({element:  doc.getElementById('bottomList'), property: ['left'], units:'%', curve: 'quad', scale: 1, a:50, b:0, pow:3, c:0}, 1000);
-
-	cachedAnims['headerGlow'] = new Sequence({element: doc.getElementById('topBG'), property: ['background-color'], color: [230, 230, 230], units:'rgb', curve: 'quad', scale: 1, a:100, b:0, pow:.4, c:0, code: dimScreen()}, 3000);
-
-	cachedAnims['bodyDarken'] = new Sequence({element: doc.getElementById('darkenScreen'), property: ['opacity'], units:'', curve: 'quad',  scale:.75, a:1, b:0, pow:1.5, c:0, code: lightenScreen()}, 200);
+(function getCachedAnims(){
+	storeAnims();
 })();
-
+ 
+  
 function lin(x, vars){
 	var y = (vars.scale * x) + vars.b;
 	return y;
 };
 
 function quad(x, vars){
-	x *= vars.scale;
-	var y = (vars.a * Math.pow(x, vars.pow)) + (vars.b * x) + vars.c;
+	var y = vars.scale * ((vars.a * Math.pow(x, vars.pow)) + (vars.b * x) + vars.c);
 	return y;
 };
 
@@ -99,12 +122,64 @@ Sequence.prototype.graph = function(progress){
 	return pos;
 };
 
+
+Sequence.prototype.graph = function(progress){
+	var pos;
+
+	switch (this.vars.curve) {
+	    case 'linear': pos = lin(progress, this.vars);
+	        break;
+	    case 
+	    	'quad': pos = quad(progress, this.vars);
+	        break;
+	    // case 'circ':
+	    //     pos = circ(progress);
+	    // case 'custom':
+	    //     pos = this.vars.customFunc(progress);
+	}
+	return pos;
+};
+
+function setColor( frac, targetColor, defColor, units ){
+	var result = [];
+	result[0] = frac * (targetColor[0] - defColor[0]) + defColor[0];
+	result[1] = frac * (targetColor[1] - defColor[1]) + defColor[1];
+	result[2] = frac * (targetColor[2] - defColor[2]) + defColor[2];
+	if( units == 'hsl' ){
+		//don't need to change it back, actually. just need to use hsl(,,)
+		result = hslToRgb(result[0], result[1], result[2]);
+	} else if ( units == 'rgb' ){
+		result[0] = Math.round(result[0]);
+		result[1] = Math.round(result[1]);
+		result[2] = Math.round(result[2]);
+	}
+
+	return "rgb("+result[0]+","+result[1]+","+result[2]+")";
+}
+
+function setTransform(frac, type, transforms, targetTrans, trans, units){
+	var result = "";
+	for(var j = 0; j <= transforms - 1; j++){
+		var total = ( frac * targetTrans[j] ) + trans[j];
+		result = result + " " + total + units;
+		if(j < transforms - 1){
+			result = result + ",";
+		}
+	} 
+	result = type + "(" + result + ")";
+	return result;
+}
+
+function setVal(frac, def, units){
+	return (def + frac) + units;
+}
+
+
 Sequence.prototype.step = function step(change){
 /*	when multiple animations are implemented, 
 	all data accessing needs to be done at the same time 
 	and data updates need to be done at the same time*/
 	var total;
-
 
 	if(this.vars.code){
 		var exec = this.vars.code;
@@ -113,72 +188,31 @@ Sequence.prototype.step = function step(change){
 
 	for(var i = 0; i <= this.vars.property.length - 1; i++){
 		if(this.vars.units == 'hsl' || this.vars.units == 'rgb'){
-			var result = [];
-			result[0] = change * (this.vars.color[0] - this.vars.default[i][0])+ this.vars.default[i][0];
-			result[1] = change * (this.vars.color[1] - this.vars.default[i][1])+ this.vars.default[i][1];
-			result[2] = change * (this.vars.color[2] - this.vars.default[i][2])+ this.vars.default[i][2];
-			if( this.vars.units == 'hsl' ){
-				result = hslToRgb(result[0], result[1], result[2]);
-			} else if ( this.vars.units == 'rgb' ){
-				result[0] = Math.round(result[0]);
-				result[1] = Math.round(result[1]);
-				result[2] = Math.round(result[2]);
-			}
-			total = "rgb("+result[0]+","+result[1]+","+result[2]+")";
-
+			total = setColor( change, this.vars.color,  this.vars.default[i], this.vars.units );
 		} else if (this.vars.property == 'transform'){
-			var result = "";
-			for(var j = 0; j <= this.vars.transformBy.length - 1; j++){
-				var total = ( change * this.vars.transformBy[j] ) + this.vars.default[i][j];
-				result = result + " " + total + this.vars.units;
-				if(j < this.vars.transformBy.length - 1){
-					result = result + ",";
-				}
-			} 
-			result = this.vars.transform[0] + "(" + result + ")";
-			total = result;
-
+			//remove property and transform lengths. they should just be one value. any other animations based off of it can be done in the code or in another animation
+			//transform[0], needs to be fixed. Figure out how multiple anims should be handled already
+			total = setTransform(change, this.vars.transform[0], this.vars.transformBy.length, this.vars.transformBy, this.vars.default[i], this.vars.units );
 		} else {
-			total = (this.vars.default[i] + change) + this.vars.units;
+			total = setVal(change, this.vars.default[i], this.vars.units);
 		}
 		this.vars.element.style[this.vars.property[i]] = total;
+		if(this.vars.postCode){
+			var exec = this.vars.postCode;
+			exec(this, change)
+		}
 	}
 
-	//don't like this :<
-	// if((this.position == 0 && this.oldPosition == 0)) this.reverse = false;
+	if(this.firstFrame) this.firstFrame = false;
 	if(this.directionChange) this.directionChange = false;
 };
 
-function lightenScreen(){
-	return function(caller, progress){
-		if(progress <= 0 && caller.reverse){
-			caller.vars.element.style.display = 'none'; 
-		}
-	}
-}
-
-function dimScreen(){
-	return function(caller, progress){
-		anim1 = 'bodyDarken'
-
-		if( (caller.oldPosition == 0) || (caller.directionChange) ){
-			cachedAnims[anim1].vars.element.style.display = 'inline-block'; 
-			playAnim(anim1)
-		}
-
-		console.log(caller.directionChange); 
-
-		if(caller.reverse && caller.directionChange){
-			updateAnim(anim1, 'reverse', true)
-		}
-	}
-}
 
 function playAnim(description){
 	if(cachedAnims[description].position <= 0){
+		cachedAnims[description].description = description;
 		animStack.push(description)
 	}
-
 	cachedAnims[description].startTime = new Date;
 
 	if(cachedAnims[description].reverse){
@@ -187,8 +221,18 @@ function playAnim(description){
 		cachedAnims[description].directionChange = true;
 	}
 	runAnims();
-}
+};
 
+
+function updateAnim( anim, variable, update){
+	cachedAnims[anim][variable] = update;
+	if(variable == 'reverse'){
+		cachedAnims[anim].switchTime = new Date;
+		cachedAnims[anim].offset = cachedAnims[anim].position;
+		cachedAnims[anim].reverse = true;
+		cachedAnims[anim].directionChange = true;
+	}
+};
 
 function runAnims(){
 	if(!animating){
@@ -204,7 +248,14 @@ function animThink(){
 		var delta;
 		var complete = true;
 		for(var i = 0; i <= animStack.length - 1;i++){
+			if(cachedAnims[animStack[i]].vars.preCode){
+				var exec = cachedAnims[animStack[i]].vars.preCode;
+				exec(cachedAnims[animStack[i]], (cachedAnims[animStack[i]].position/cachedAnims[animStack[i]].dur))
+			}
+
 			cachedAnims[animStack[i]].oldPosition = cachedAnims[animStack[i]].position;
+
+			if(cachedAnims[animStack[i]].position  <= 0){cachedAnims[animStack[i]].firstFrame = true;}
 
 			if(!cachedAnims[animStack[i]].reverse){
 				if(cachedAnims[animStack[i]].position < cachedAnims[animStack[i]].dur){
@@ -215,9 +266,9 @@ function animThink(){
 			} else { 
 				//position is not functioning correctly. 
 				cachedAnims[animStack[i]].position = cachedAnims[animStack[i]].offset + (cachedAnims[animStack[i]].switchTime - new Date);
-			}
+			}	
 
-			if(cachedAnims[animStack[i]].position  < 0) cachedAnims[animStack[i]].position  = 0;
+			if(cachedAnims[animStack[i]].position  <= 0){ cachedAnims[animStack[i]].position  = 0;}
 			if(cachedAnims[animStack[i]].position  > cachedAnims[animStack[i]].dur) cachedAnims[animStack[i]].position = cachedAnims[animStack[i]].dur;	
 			
 			frac = cachedAnims[animStack[i]].position/cachedAnims[animStack[i]].dur;
@@ -225,17 +276,21 @@ function animThink(){
 			if(frac < 0) frac = 0;
 			if(frac > 1) frac = 1;	
 
-			//this is where curveStart needs to work 
-			delta = cachedAnims[animStack[i]].graph(frac);
-			cachedAnims[animStack[i]].step(delta);  
+			// console.log(frac)
+			if(frac >= cachedAnims[animStack[i]].vars.delayFrac){
+				//this is where curveStart needs to work 
+				delta = cachedAnims[animStack[i]].graph((frac- cachedAnims[animStack[i]].vars.delayFrac) * (1/(1 - cachedAnims[animStack[i]].vars.delayFrac)));
+				cachedAnims[animStack[i]].step(delta);  
+			}	
+			frac = cachedAnims[animStack[i]].position/cachedAnims[animStack[i]].dur;
 
 			if(frac < 1){
-				//check if all animations are complete done;
+				//check if all animations are complete;
 				complete = false; 
 			}
 
 			//check if the animation is completed or if it has a triggered loop
-			if (( frac >= 1 && (cachedAnims[animStack[i]].loop >= 0)) ||
+			if ((( frac >= 1 && (cachedAnims[animStack[i]].loop - cachedAnims[animStack[i]].count <= 0)) && !cachedAnims[animStack[i]].vars.biDirectional) ||
 				(cachedAnims[animStack[i]].reverse == true && frac == 0)) {
 				//if animation is done remove it
 				//update this so that animations aren't necessarily removed, may be smarter to cache em and remove one timers only
@@ -258,15 +313,6 @@ function animThink(){
   	var globalID = requestAnimationFrame(animate)
 }; 
 
-function updateAnim( anim, variable, update){
-	cachedAnims[anim][variable] = update;
-	if(variable == 'reverse'){
-		cachedAnims[anim].switchTime = new Date;
-		cachedAnims[anim].offset = cachedAnims[anim].position;
-		cachedAnims[anim].reverse = true;
-		cachedAnims[anim].directionChange = true;
-	}
-}
 
 ////////////////////////->////////////////////////
 // utilities that I may or may not have written //
@@ -282,7 +328,7 @@ function rgbSplit(colorString){
 	colorsOnly[2] = parseFloat(colorsOnly[2]);
 
 	return colorsOnly;
-}
+};
 
 function hslToRgb(h, s, l){
     var r, g, b;
@@ -307,7 +353,8 @@ function hslToRgb(h, s, l){
     }
 
     return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-}
+};
+
 function rgbToHsl(r, g, b){
     r /= 255, g /= 255, b /= 255;
     var max = Math.max(r, g, b), min = Math.min(r, g, b);
@@ -326,13 +373,13 @@ function rgbToHsl(r, g, b){
         h /= 6;
     }
     return [h, s, l];
-}
+};
 
 ////////////////////////->////////////////////////
 // todo											//
 ////////////////////////->////////////////////////
-	//clean up repetition
-	//might be better to not use loops at all and just assign numbers to animations with something like a c #define for their names and lookups no for looping, yay!
+	//more advanced curves
+	//need a way to determine whether or not an animation has properties or is just a container for other animations
 
 ////////////////////////->////////////////////////
 // esamples										//
