@@ -2,6 +2,7 @@
 var animating = false;
 var cachedAnims = []; //all animations
 var animStack = []; //stores indexes of currently active cachedAnims. That's it. That's the whole thing.
+var updates = [];
 
 var win = window;
 var doc = document;
@@ -174,6 +175,9 @@ function setVal(frac, def, units){
 	return (def + frac) + units;
 }
 
+function addUpdate( element, prop, update){
+	updates.push([element, prop, update])
+}
 
 Sequence.prototype.step = function step(change){
 /*	when multiple animations are implemented, 
@@ -196,7 +200,9 @@ Sequence.prototype.step = function step(change){
 		} else {
 			total = setVal(change, this.vars.default[i], this.vars.units);
 		}
-		this.vars.element.style[this.vars.property[i]] = total;
+
+		addUpdate(this.vars.element, this.vars.property[i], total);
+		
 		if(this.vars.postCode){
 			var exec = this.vars.postCode;
 			exec(this, change)
@@ -242,6 +248,13 @@ function runAnims(){
 	} else {
 	}
 };  
+
+function 	parseUpdates(){
+	for (var i = updates.length - 1; i >= 0; i--) {
+		updates[i][0].style[updates[i][1]] = updates[i][2];
+		updates.pop(updates[i])
+	}
+}
 
 function animThink(){
 	function animate(){
@@ -297,6 +310,12 @@ function animThink(){
 				animStack.splice(i, 1);
 				i--;
 			}
+		}
+
+		parseUpdates();
+		for (var i = updates.length - 1; i >= 0; i--) {
+			updates[i][0].style[updates[i][1]] = updates[i][2];
+			updates.pop(updates[i])
 		}
 
 		if(complete){
